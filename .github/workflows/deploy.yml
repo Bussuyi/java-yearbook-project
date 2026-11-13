@@ -1,0 +1,89 @@
+
+name: DevOps End-to-End Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: java/pom.xml
+
+      - name: Build Java Application
+        run: |
+          cd java
+          mvn clean package -DskipTests
+
+      - name: Configure Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Initialize Terraform
+        run: terraform -chdir=terraform init
+
+      - name: Validate Terraform
+        run: terraform -chdir=terraform validate
+
+      - name: Apply Terraform
+        run: terraform -chdir=terraform apply -auto-approve
+        env:
+          TF_VAR_key_name: devops-capstone-key
+
+      - name: Get EC2 Public IP
+        id: terraform-output
+        run: |
+          IP=$(terraform -chdir=terraform output -raw ec2_public_ip)
+          echo "EC2_IP=$IP" >> $GITHUB_ENV
+
+      - name: Install Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+
+      - name: Prepare SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' '${{ secrets.EC2_SSH_PRIVATE_KEY }}' > ~/.ssh/devops-key.pem
+          chmod 600 ~/.ssh/devops-key.pem
+
+      - name: Generate Ansible Inventory
+        run: |
+          mkdir -p ansible
+          cat > ansible/inventory.ini <<EOF
+          [webservers]
+          aws-server ansible_host=${EC2_IP} ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/devops-key.pem
+          EOF
+
+      - name: Deploy Applications with Ansible
+        run: |
+          ANSIBLE_HOST_KEY_CHECKING=False \
+          ansible-playbook \
+          -i ansible/inventory.ini \
+          ansible/playbook.yml
