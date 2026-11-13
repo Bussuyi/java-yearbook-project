@@ -55,6 +55,14 @@ jobs:
           c = json.loads(base64.urlsafe_b64decode(p))
           print({k: c.get(k) for k in ('iss', 'aud', 'sub')})
           PY
+
+      - name: Check secrets exist
+        env:
+          K: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          S: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          [ -n "$K" ] && echo "key id: SET (length ${#K})" || echo "key id: EMPTY"
+          [ -n "$S" ] && echo "secret: SET (length ${#S})" || echo "secret: EMPTY"
           
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
